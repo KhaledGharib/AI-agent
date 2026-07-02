@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="noptechs_ai_workspace.AIWorkspace">
+        <div class="o_ai_workspace d-flex h-100 w-100">
+            <!-- Sidebar -->
+            <div class="o_ai_ws_sidebar d-flex flex-column flex-shrink-0">
+                <div class="o_ai_ws_sidebar_header p-2 border-bottom">
+                    <button class="btn btn-primary w-100 d-flex align-items-center justify-content-center"
+                            t-att-disabled="!state.agents.length"
+                            t-on-click="() => this.newChat()">
+                        <i class="fa fa-plus me-2"/>
+                        <span>New chat</span>
+                    </button>
+                    <select t-if="state.agents.length > 1"
+                            class="form-select form-select-sm mt-2"
+                            t-on-change="onSelectAgent">
+                        <t t-foreach="state.agents" t-as="agent" t-key="agent.id">
+                            <option t-att-value="agent.id"
+                                    t-att-selected="agent.id === state.activeAgentId"
+                                    t-esc="agent.name"/>
+                        </t>
+                    </select>
+                </div>
+                <div class="o_ai_ws_chat_list flex-grow-1 overflow-auto p-1">
+                    <t t-foreach="state.chats" t-as="chat" t-key="chat.id">
+                        <div class="o_ai_ws_chat_item d-flex align-items-center px-2 py-2 rounded mb-1"
+                             t-att-class="{ 'o_active': isActive(chat.id) }"
+                             t-on-click="() => this.openChat(chat.id)">
+                            <i class="fa fa-comment-o me-2 opacity-75"/>
+                            <span class="o_ai_ws_chat_title text-truncate flex-grow-1" t-esc="chat.name"/>
+                            <button class="btn btn-link btn-sm o_ai_ws_action p-0 ms-1"
+                                    title="Rename"
+                                    t-on-click="(ev) => this.renameChat(chat.id, ev)">
+                                <i class="fa fa-pencil"/>
+                            </button>
+                            <button class="btn btn-link btn-sm o_ai_ws_action text-danger p-0 ms-1"
+                                    title="Delete"
+                                    t-on-click="(ev) => this.deleteChat(chat.id, ev)">
+                                <i class="fa fa-trash-o"/>
+                            </button>
+                        </div>
+                    </t>
+                    <div t-if="!state.chats.length and !state.loading"
+                         class="text-muted text-center small p-3">
+                        No conversations yet.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main panel -->
+            <div class="o_ai_ws_main flex-grow-1 d-flex flex-column">
+                <t t-if="state.thread">
+                    <div class="o_ai_ws_thread flex-grow-1 overflow-auto">
+                        <Thread thread="state.thread" t-key="state.thread.localId" jumpPresent="state.jumpPresent"/>
+                    </div>
+                    <div class="o_ai_ws_composer p-3">
+                        <div class="o_ai_ws_composer_inner mx-auto">
+                            <Composer composer="state.thread.composer"
+                                      autofocus="true"
+                                      onPostCallback="onMessagePosted"/>
+                        </div>
+                    </div>
+                </t>
+                <div t-else=""
+                     class="o_ai_ws_empty d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+                    <i class="fa fa-magic fa-3x mb-3 opacity-50"/>
+                    <h4 class="mb-1">How can I help you?</h4>
+                    <p class="small">Start a new chat or pick a conversation on the left.</p>
+                </div>
+            </div>
+        </div>
+    </t>
+</templates>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_ai_workspace" model="ir.actions.client">
+        <field name="name">AI Workspace</field>
+        <field name="tag">noptechs_ai_workspace_action</field>
+    </record>
+
+    <!-- Live under the standard "AI" app root menu (from ai_app) instead of a
+         separate app. Shown first, above Agents/Configuration. Visible to every
+         internal user (the "User" role, base.group_user). -->
+    <menuitem id="menu_ai_workspace_main"
+              name="Workspace"
+              parent="ai_app.ai_menu_root"
+              action="action_ai_workspace"
+              groups="base.group_user"
+              sequence="10"/>
+
+    <!-- Restrict agent management + configuration to the "Administrator" role
+         (base.group_system), so normal users only get the Workspace. -->
+    <record id="ai_app.ai_menu" model="ir.ui.menu">
+        <field name="group_ids" eval="[(4, ref('base.group_system'))]"/>
+    </record>
+    <record id="ai_app.ai_config_menu" model="ir.ui.menu">
+        <field name="group_ids" eval="[(4, ref('base.group_system'))]"/>
+    </record>
+</odoo>

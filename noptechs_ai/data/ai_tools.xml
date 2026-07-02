@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Rules for ai_tool_schema (Odoo's own validator enforces these):
+          - "type" must be a SINGLE string: string | integer | number | boolean | array | object | null
+          - "object" type requires both "properties" and "required" keys
+          - "array" type requires "items" key
+          - Allowed extra attributes per param: description, enum, maxLength (string), pattern
+          - Params NOT in "required" are automatically set to None by Odoo if the LLM omits them
+
+        Rules for the code field (XML text content):
+          - Use &lt; for <   &gt; for >   &amp; for &
+          - Or use chr(60) for < and chr(62) for > to avoid escaping in comparisons
+          - Set ai['result'] = "string" to return a value to the LLM
+    -->
+
+    <!-- ============================================================ -->
+    <!--  TOOL 1 — Raise a Helpdesk Ticket from a Discuss channel     -->
+    <!-- ============================================================ -->
+    <record id="ai_tool_create_ticket" model="ir.actions.server">
+        <field name="name">Create Helpdesk Ticket</field>
+        <field name="model_id" ref="helpdesk.model_helpdesk_ticket"/>
+        <field name="state">code</field>
+        <field name="use_in_ai" eval="True"/>
+        <field name="ai_tool_description">
+            Create a helpdesk support ticket from a customer message in a Discuss channel.
+            Use this when a user reports a bug, error, or issue that needs tracking.
+            Supports assigning a user, applying tags, and setting customer name, email, and phone directly.
+            Always include channel_id so a link back to the conversation is added.
+        </field>
+        <field name="ai_tool_schema">{
+    "type": "object",
+    "properties": {
+        "subject":         {"type": "string",  "description": "Short title describing the issue"},
+        "description":     {"type": "string",  "description": "Full description of the error or issue"},
+        "channel_id":      {"type": "integer", "description": "Discuss channel ID where the issue was reported (optional)"},
+        "assignee_id":     {"type": "integer", "description": "res.users ID to assign the ticket to (optional)"},
+        "partner_id":      {"type": "integer", "description": "Customer res.partner ID if already known (optional)"},
+        "customer_name":   {"type": "string",  "description": "Customer full name — used to find or store on the ticket (optional)"},
+        "customer_email":  {"type": "string",  "description": "Customer email address (optional)"},
+        "customer_phone":  {"type": "string",  "description": "Customer phone number (optional)"},
+        "tag_names":       {"type": "array",   "description": "Tag names to apply, e.g. ['bug', 'urgent']. Tags are created if they do not exist.", "items": {"type": "string"}}
+    },
+    "required": ["subject", "description"]
+}</field>
+        <field name="code">
+base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+
+# Build description with channel link
+full_desc = description or ''
+if channel_id:
+    ch_rec = env['discuss.channel'].sudo().browse(int(channel_id))
+    ch_name = ch_rec.name if ch_rec.exists() else ''
+    full_desc += '\n\n---\nSource channel: ' + base_url + '/odoo/discuss/channel-' + str(channel_id)
+    if ch_name:
+        full_desc += '  (' + ch_name + ')'
+
+vals = {'name': subject, 'description': full_desc}
+
+# Assignee
+if assignee_id:
+    vals['user_id'] = int(assignee_id)
+
+# Customer — prefer partner_id; fall back to name/email/phone stored directly on the ticket
+if partner_id:
+    vals['partner_id'] = int(partner_id)
+if customer_name:
+    vals['partner_name'] = customer_name.strip()
+if customer_email:
+    vals['partner_email'] = customer_email.strip()
+if customer_phone:
+    vals['partner_phone'] = customer_phone.strip()
+
+# Tags — look up by name (case-insensitive), create if missing
+if tag_names:
+    tag_ids_list = []
+    for tag_name in tag_names:
+        tag_name = tag_name.strip()
+        if not tag_name:
+            continue
+        tag = env['helpdesk.tag'].sudo().search([('name', '=ilike', tag_name)], limit=1)
+        if not tag:
+            tag = env['helpdesk.tag'].sudo().create({'name': tag_name})
+        tag_ids_list.append(tag.id)
+    if tag_ids_list:
+        vals['tag_ids'] = [(6, 0, tag_ids_list)]
+
+ticket = env['helpdesk.ticket'].sudo().create(vals)
+
+tags_str = ', '.join(t.name for t in ticket.tag_ids) if ticket.tag_ids else 'none'
+assignee_str = ticket.user_id.name if ticket.user_id else 'unassigned'
+ai['result'] = (
+    "Ticket '%s' created (ID %d).\n"
+    "  Assignee: %s\n"
+    "  Tags: %s\n"
+    "  Customer: %s | %s | %s\n"
+    "  Link: %s/odoo/helpdesk/%d"
+) % (
+    ticket.name, ticket.id,
+    assignee_str,
+    tags_str,
+    ticket.partner_name or '-', ticket.partner_email or '-', ticket.partner_phone or '-',
+    base_url, ticket.id,
+)
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--  TOOL 2 — Find or Create a Contact                           -->
+    <!-- ============================================================ -->
+    <record id="ai_tool_find_partner" model="ir.actions.server">
+        <field name="name">Find or Create Contact</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">code</field>
+        <field name="use_in_ai" eval="True"/>
+        <field name="ai_tool_description">
+            Search for an existing contact (partner) by email or name.
+            If not found and search_only is false, create a new contact.
+            Call this first whenever you need a partner_id for another tool.
+        </field>
+        <field name="ai_tool_schema">{
+    "type": "object",
+    "properties": {
+        "email":       {"type": "string",  "description": "Email to search — preferred, case-insensitive. Omit if unknown."},
+        "name":        {"type": "string",  "description": "Name to search when no email is given. Required for creating a new contact."},
+        "phone":       {"type": "string",  "description": "Phone number — only stored when creating a new contact. Omit if unknown."},
+        "search_only": {"type": "boolean", "description": "Pass true to only search and never create a new contact."}
+    },
+    "required": []
+}</field>
+        <field name="code">
+_email = (email or '').strip()
+_name = (name or '').strip()
+_phone = (phone or '').strip()
+_only = bool(search_only)
+
+if _email:
+    partners = env['res.partner'].sudo().search([('email', '=ilike', _email)], limit=5)
+elif _name:
+    partners = env['res.partner'].sudo().search([('name', 'ilike', _name)], limit=5)
+else:
+    ai['result'] = 'Error: provide at least an email or a name to search.'
+    partners = env['res.partner'].sudo()
+
+if partners:
+    lines = ['Found %d contact(s):' % len(partners)]
+    for p in partners:
+        lines.append('  ID %d | %s | email: %s | phone: %s' % (
+            p.id, p.name, p.email or '-', p.phone or '-'))
+    ai['result'] = '\n'.join(lines)
+elif not (_email or _name):
+    pass  # error already set above
+elif _only:
+    ai['result'] = 'No contact found matching the search.'
+elif not _name:
+    ai['result'] = 'Error: a name is required to create a new contact.'
+else:
+    vals = {'name': _name}
+    if _email:
+        vals['email'] = _email
+    if _phone:
+        vals['phone'] = _phone
+    p = env['res.partner'].sudo().create(vals)
+    ai['result'] = 'New contact created — ID %d | %s | email: %s | phone: %s' % (
+        p.id, p.name, p.email or '-', p.phone or '-')
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--  TOOL 3 — Search Knowledge Articles                          -->
+    <!-- ============================================================ -->
+    <record id="ai_tool_search_knowledge" model="ir.actions.server">
+        <field name="name">Search Knowledge Articles</field>
+        <field name="model_id" ref="knowledge.model_knowledge_article"/>
+        <field name="state">code</field>
+        <field name="use_in_ai" eval="True"/>
+        <field name="ai_tool_description">
+            Search the internal Knowledge base for articles matching a keyword.
+            Only articles inside the folders configured in Settings &gt; Noptechs AI are accessible.
+            Returns article titles and a plain-text excerpt of their content.
+        </field>
+        <field name="ai_tool_schema">{
+    "type": "object",
+    "properties": {
+        "query": {"type": "string",  "description": "Keyword to look for in article titles and body. Omit to list all accessible articles."},
+        "limit": {"type": "integer", "description": "Maximum number of results to return (default 5, max 20)"}
+    },
+    "required": []
+}</field>
+        <field name="code">
+_q = (query or '').strip()
+_lim = max(1, min(int(limit or 5), 20))
+
+param = env['ir.config_parameter'].sudo().get_param('noptechs_ai.knowledge_article_ids', default='')
+if not param:
+    ai['result'] = 'No Knowledge folders configured. Go to Settings > Noptechs AI to pick accessible folders.'
+else:
+    root_ids = [int(x) for x in param.split(',') if x.strip().isdigit()]
+    collected = set(root_ids)
+    frontier = list(root_ids)
+    while frontier:
+        children = env['knowledge.article'].sudo().search([('parent_id', 'in', frontier)])
+        new_ids = set(children.ids) - collected
+        collected.update(new_ids)
+        frontier = list(new_ids)
+
+    domain = [('id', 'in', list(collected))]
+    if _q:
+        domain += ['|', ('name', 'ilike', _q), ('body', 'ilike', _q)]
+
+    articles = env['knowledge.article'].sudo().search(domain, limit=_lim)
+    if not articles:
+        msg = 'No articles found'
+        if _q:
+            msg += ' for "' + _q + '".'
+        else:
+            msg += '.'
+        ai['result'] = msg
+    else:
+        # Strip HTML tags using chr(60)=&lt; and chr(62)=&gt; so no XML escaping needed
+        _lt = chr(60)
+        _gt = chr(62)
+        lines = ['Found %d article(s):' % len(articles)]
+        for a in articles:
+            lines.append('\n=== %s (ID %d) ===' % (a.name, a.id))
+            raw = a.body or ''
+            text = []
+            in_tag = False
+            for ch in raw:
+                if ch == _lt:
+                    in_tag = True
+                elif ch == _gt:
+                    in_tag = False
+                elif not in_tag:
+                    text.append(ch)
+            excerpt = ''.join(text).strip()
+            # trim long articles — write 500 &gt; as &gt; in XML, becomes > in Python
+            if len(excerpt) &gt; 500:
+                excerpt = excerpt[:500] + '...'
+            lines.append(excerpt)
+        ai['result'] = '\n'.join(lines)
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--  TOOL 4 — Create a CRM Lead                                  -->
+    <!-- ============================================================ -->
+    <record id="ai_tool_create_lead" model="ir.actions.server">
+        <field name="name">Create CRM Lead</field>
+        <field name="model_id" ref="crm.model_crm_lead"/>
+        <field name="state">code</field>
+        <field name="use_in_ai" eval="True"/>
+        <field name="ai_tool_description">
+            Create a new sales lead (opportunity) in the CRM.
+            Use this when a customer expresses interest in a product or service.
+            Returns the lead ID and a direct link.
+        </field>
+        <field name="ai_tool_schema">{
+    "type": "object",
+    "properties": {
+        "lead_name":   {"type": "string",  "description": "Lead title, e.g. 'Interest in Product X — Acme Corp'"},
+        "email":       {"type": "string",  "description": "Customer email (optional)"},
+        "phone":       {"type": "string",  "description": "Customer phone (optional)"},
+        "description": {"type": "string",  "description": "Notes or context about the lead (optional)"},
+        "partner_id":  {"type": "integer", "description": "ID of an existing contact to link (optional)"}
+    },
+    "required": ["lead_name"]
+}</field>
+        <field name="code">
+base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+
+vals = {'name': lead_name}
+if email:
+    vals['email_from'] = email.strip()
+if phone:
+    vals['phone'] = phone.strip()
+if description:
+    vals['description'] = description.strip()
+if partner_id:
+    vals['partner_id'] = int(partner_id)
+
+lead = env['crm.lead'].sudo().create(vals)
+ai['result'] = "Lead '%s' created (ID %d). Link: %s/odoo/crm/%d" % (
+    lead.name, lead.id, base_url, lead.id)
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!--  AI TOPIC — groups the four tools for the agent              -->
+    <!-- ============================================================ -->
+    <record id="ai_topic_noptechs" model="ai.topic">
+        <field name="name">Noptechs Operations</field>
+        <field name="description">Raise tickets, manage contacts, search Knowledge, create CRM leads.</field>
+        <field name="instructions">
+When the user asks to raise or create a ticket, use create_ticket. Always include channel_id if you know it.
+When the user mentions a customer by name or email, call find_or_create_partner first to get their partner_id.
+When the user needs information from internal documentation, call search_knowledge.
+When a customer shows interest in something, use create_lead.
+After each action confirm what you did and share the link to the created record.
+        </field>
+        <field name="tool_ids" eval="[
+            (4, ref('ai_tool_create_ticket')),
+            (4, ref('ai_tool_find_partner')),
+            (4, ref('ai_tool_search_knowledge')),
+            (4, ref('ai_tool_create_lead')),
+        ]"/>
+    </record>
+
+</odoo>

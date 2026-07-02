@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="whatsapp_account_view_form_ai" model="ir.ui.view">
+        <field name="name">whatsapp.account.view.form.ai</field>
+        <field name="model">whatsapp.account</field>
+        <field name="inherit_id" ref="whatsapp.whatsapp_account_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='tocontrol']" position="after">
+                <div class="o_horizontal_separator mt-4 mb-3 text-uppercase fw-bolder small">AI Agent</div>
+                <div class="row mt16 o_settings_container" id="ai_agent_setup">
+                    <setting string="AI Agent"
+                             help="An AI agent that automatically answers inbound conversations for this account.">
+                        <field name="ai_agent_id"/>
+                    </setting>
+                    <setting string="Auto-Reply"
+                             help="Let the AI agent reply automatically until a human operator takes over."
+                             invisible="not ai_agent_id">
+                        <field name="ai_auto_reply"/>
+                    </setting>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>

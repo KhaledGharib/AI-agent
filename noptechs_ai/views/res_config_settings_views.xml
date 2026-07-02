@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="noptechs_ai_res_config_settings_view" model="ir.ui.view">
+        <field name="name">noptechs.ai.res.config.settings</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="Noptechs AI" name="noptechs_ai" data-string="Noptechs AI">
+                    <block title="Knowledge Access" name="noptechs_ai_knowledge_block">
+                        <setting string="Accessible Knowledge Folders"
+                                 help="Select the top-level Knowledge folders the AI may search. All articles nested inside those folders are automatically included. Leave empty to block all Knowledge access.">
+                            <field name="noptechs_ai_knowledge_article_ids" widget="many2many_tags" options="{'no_create': True}"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

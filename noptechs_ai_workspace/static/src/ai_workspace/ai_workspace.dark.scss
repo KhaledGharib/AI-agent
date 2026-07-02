@@ -1,0 +1,17 @@
+// Dark-mode surface tuning, mirroring mail's discuss_content.dark.scss.
+// Bundled into web.assets_web_dark only (see __manifest__.py).
+.o_ai_workspace {
+    .o_ai_ws_sidebar {
+        background-color: mix($white, $o-webclient-background-color, 15%);
+
+        .o_ai_ws_chat_item {
+            &:hover {
+                background-color: mix($gray-200, $gray-300);
+            }
+
+            &.o_active {
+                background-color: $gray-300;
+            }
+        }
+    }
+}
