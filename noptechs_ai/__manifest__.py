@@ -16,7 +16,7 @@
 
     # 'ai' and 'helpdesk' are Enterprise-only modules.
     # Remove them if you are on Community edition (and remove the matching tools).
-    'depends': ['base', 'mail', 'helpdesk', 'knowledge', 'crm', 'ai'],
+    'depends': ['base', 'mail', 'helpdesk', 'knowledge', 'crm', 'ai', 'ai_app'],
 
     'data': [
         'security/ir.model.access.csv',
