@@ -1,16 +1,15 @@
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
+# Part of Noptechs AI Workspace.
 import base64
 import logging
 
 from odoo import models
-from odoo.tools import html2plaintext
 
 from odoo.addons.ai.utils.llm_api_service import LLMApiService
 
 _logger = logging.getLogger(__name__)
 
-# WhatsApp caps a single message at 30 attachments; we cap much lower to keep
-# the LLM request size (and cost) reasonable.
+# Keep in line with noptechs_whatsapp_ai's own cap so LLM request size/cost
+# stays reasonable regardless of which channel triggered the agent.
 MAX_ATTACHMENTS_PER_MESSAGE = 5
 MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024  # 20 MB
 
@@ -18,23 +17,8 @@ MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024  # 20 MB
 class AiAgent(models.Model):
     _inherit = 'ai.agent'
 
-    def _post_ai_response(self, channel, message):
-        # On WhatsApp channels the reply must be posted as a 'whatsapp_message'
-        # so the standard WhatsApp pipeline relays it back to the customer.
-        # (The base implementation posts a plain 'comment', which stays internal.)
-        if channel.channel_type == 'whatsapp':
-            whatsapp_body = html2plaintext(message or "").strip()
-            channel.sudo().message_post(
-                author_id=self.partner_id.id,
-                body=whatsapp_body,
-                message_type='whatsapp_message',
-                subtype_xmlid='mail.mt_comment',
-            )
-            return
-        return super()._post_ai_response(channel, message)
-
     def _get_message_files(self, mail_message, channel):
-        if channel.channel_type != 'whatsapp' or not mail_message.attachment_ids:
+        if channel.channel_type != 'ai_chat' or not mail_message.attachment_ids:
             return super()._get_message_files(mail_message, channel)
 
         provider = self._get_provider()
@@ -55,7 +39,7 @@ class AiAgent(models.Model):
             elif mimetype.startswith('video/') and provider == 'google':
                 # Only Gemini can natively read video content; other providers can't.
                 files.append({'mimetype': mimetype, 'value': base64.b64encode(attachment.raw).decode()})
-            elif mimetype.startswith('audio/') and (transcript := self._whatsapp_ai_transcribe(attachment)):
+            elif mimetype.startswith('audio/') and (transcript := self._ai_workspace_transcribe(attachment)):
                 files.append({'mimetype': 'text/plain', 'value': f"[Voice message transcript]: {transcript}"})
             else:
                 unread.append(attachment.name or mimetype or "file")
@@ -67,20 +51,20 @@ class AiAgent(models.Model):
             files.append({
                 'mimetype': 'text/plain',
                 'value': (
-                    "[The customer also sent the following attachment(s) which you cannot read with your "
+                    "[The user also sent the following attachment(s) which you cannot read with your "
                     f"current capabilities: {', '.join(unread)}. Acknowledge them politely and, if needed "
-                    "to answer, ask the customer to describe the content or resend it as an image or PDF.]"
+                    "to answer, ask the user to describe the content or resend it as an image or PDF.]"
                 ),
             })
 
         return files
 
-    def _whatsapp_ai_transcribe(self, attachment):
+    def _ai_workspace_transcribe(self, attachment):
         """Transcribe a voice/audio attachment with Whisper so the agent can react to it."""
         try:
             return LLMApiService(env=self.env, provider='openai').get_transcription(
                 attachment.raw, mimetype=attachment.mimetype or 'audio/ogg',
             )
         except Exception:
-            _logger.exception("WhatsApp AI: failed to transcribe audio attachment %s", attachment.name)
+            _logger.exception("AI Workspace: failed to transcribe audio attachment %s", attachment.name)
             return None

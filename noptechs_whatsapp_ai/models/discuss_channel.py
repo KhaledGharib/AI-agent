@@ -71,8 +71,7 @@ class DiscussChannel(models.Model):
             if (
                 account.ai_auto_reply
                 and not self.whatsapp_ai_paused
-                and message.body
-                and message.body.strip()
+                and ((message.body and message.body.strip()) or message.attachment_ids)
             ):
                 self.sudo().whatsapp_ai_pending_message_id = message.id
                 self.env.ref('noptechs_whatsapp_ai.ir_cron_whatsapp_ai_reply').sudo()._trigger()
